@@ -2,44 +2,88 @@ name: Deploy on Azure App Services
 
 on: [push]
 
+concurrency: Production
+
 permissions:
   id-token: write
   contents: read
 
 env:
-  AZURE_WEBAPP_NAME: nestjs-azure-app-services-starter
   AZURE_WEBAPP_PACKAGE_PATH: dist/app.zip
   NODE_VERSION: '20'
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: 'Checkout GitHub Action'
-        uses: actions/checkout@main
+      - uses: actions/checkout@main
 
-      - uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Setup Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: 'npm install, build, and test'
-        run: |
+      - run: |
           npm install
           npm run build
           npm run package
 
-      - uses: azure/webapps-deploy@v3
+      - uses: actions/upload-artifact@v4
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+  deploy-development:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: development
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ vars.AZURE_APP_NAME }}
           package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
 
-      - name: logout
-        run: |
-          az logout
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    if: github.ref == 'refs/heads/release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ vars.AZURE_APP_NAME }}
+          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+  deploy-production:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.ref == 'refs/heads/production'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ vars.AZURE_APP_NAME }}
+          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
